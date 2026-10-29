@@ -1,0 +1,27 @@
+import type { DefaultSession } from "next-auth";
+import type { Role } from "@/lib/roles";
+
+declare module "next-auth" {
+  interface User {
+    role: Role;
+  }
+  interface Session {
+    user: { id: string; role: Role } & DefaultSession["user"];
+  }
+}
+
+declare module "next-auth/jwt" {
+  interface JWT {
+    id: string;
+    role: Role;
+  }
+}
+
+// next-auth v5 beta me-re-export tipe JWT dari @auth/core; augmentasi "next-auth/jwt"
+// saja tidak selalu terbaca, jadi tipe yang sama dideklarasikan juga di sini.
+declare module "@auth/core/jwt" {
+  interface JWT {
+    id: string;
+    role: Role;
+  }
+}

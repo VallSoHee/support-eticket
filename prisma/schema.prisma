@@ -1,0 +1,525 @@
+// KelolaSupport — Prisma schema
+// Mengikuti ERD di 03-Desain-Diagram-KelolaSupport.pdf.
+// Koneksi database (DATABASE_URL) dikonfigurasi di prisma.config.ts (Prisma ORM v7),
+// BUKAN di sini — lihat catatan di file tersebut.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+// ---------------------------------------------------------------------------
+// ENUMS
+// ---------------------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  PETUGAS_L1
+  PETUGAS_L2
+  CLIENT
+}
+
+enum ShiftType {
+  PAGI
+  SIANG
+  MALAM
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// Platform tempat masalah terjadi (diisi client saat mengajukan tiket).
+enum Platform {
+  WEB
+  ANDROID
+  IOS
+  DESKTOP
+  OTHER
+}
+
+// FR-3.3 — alur status tiket end-to-end.
+enum TicketStatus {
+  OPEN
+  BOT_HANDLING
+  WAITING_AGENT_L1
+  IN_PROGRESS_L1
+  ESCALATED_L2
+  IN_PROGRESS_L2
+  RESOLVED
+  CLOSED
+}
+
+// Satu tiket = 1 sesi PUBLIC (bot+client+L1) dan/atau 1 sesi INTERNAL (L1+L2).
+// Lihat "Keputusan desain penting" di 03-Desain-Diagram-KelolaSupport.pdf.
+enum ChatSessionType {
+  PUBLIC
+  INTERNAL
+}
+
+enum SenderType {
+  BOT
+  CLIENT
+  PETUGAS_L1
+  PETUGAS_L2
+}
+
+enum TimelineActorType {
+  BOT
+  L1
+  L2
+  SYSTEM
+  ADMIN
+}
+
+enum QueueLevel {
+  L1
+  L2
+}
+
+// Tujuan kode OTP email: verifikasi saat register, dan dua langkah ganti email di profil.
+enum OtpPurpose {
+  REGISTER
+  EMAIL_CHANGE_OLD
+  EMAIL_CHANGE_NEW
+}
+
+enum NotificationType {
+  SLA_WARNING
+  SLA_BREACH
+  NEW_REPLY
+  STATUS_CHANGE
+  NEW_TICKET
+  ANNOUNCEMENT
+}
+
+// Ke mana notifikasi mengarah saat diklik (diatur Admin per aturan, lihat NotificationRule).
+enum NotificationTarget {
+  TICKET
+  TICKET_LIST
+  DASHBOARD
+  CUSTOM
+}
+
+// ---------------------------------------------------------------------------
+// USER & SHIFT (Modul 1 & 2 — Auth, Manajemen User & Shift)
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  // Nullable: akun yang daftar lewat Google tidak punya password (login hanya via OAuth
+  // sampai user memakai "Forgot password" untuk membuat password sendiri).
+  passwordHash String?
+  role         Role
+  isActive     Boolean  @default(true)
+  isOnline     Boolean  @default(false)
+  // Nama file foto profil di storage/uploads/avatars (null = pakai inisial). Disajikan lewat /api/avatar/[id].
+  avatarName   String?
+  // Warna tema aplikasi pilihan user, hex "#rrggbb" (null = warna bawaan). Disimpan di akun (bukan
+  // localStorage) supaya server sudah memasangnya di HTML pertama -> tidak ada kedipan warna bawaan.
+  themeColor   String?  @db.VarChar(7)
+  createdAt    DateTime @default(now())
+
+  shifts Shift[]
+
+  // Tiket: 3 relasi terpisah karena kepemilikan client, L1, dan L2 adalah 3 hal berbeda
+  // (lihat keputusan desain assigned_l1_id / assigned_l2_id di dokumen Tahap 3).
+  ticketsAsClient Ticket[] @relation("TicketClient")
+  ticketsAsL1     Ticket[] @relation("TicketAssignedL1")
+  ticketsAsL2     Ticket[] @relation("TicketAssignedL2")
+
+  timelineEntries TicketTimeline[]
+  messages        Message[]
+  queueEntries    QueueEntry[]
+  notifications   Notification[]
+  auditLogs       AuditLog[]
+
+  passwordResetTokens PasswordResetToken[]
+  emailOtps           EmailOtp[]
+  accounts            Account[]
+  attachments         TicketAttachment[]
+  hiddenMessages      MessageHide[]
+
+  @@map("users")
+}
+
+// FR-2.2 — jadwal shift per petugas (Pagi/Siang/Malam + tanggal berlaku).
+model Shift {
+  id             String    @id @default(cuid())
+  petugasId      String
+  shiftType      ShiftType
+  tanggalBerlaku DateTime  @db.Date
+  jamMulai       DateTime  @db.Time
+  jamSelesai     DateTime  @db.Time
+
+  petugas User @relation(fields: [petugasId], references: [id], onDelete: Cascade)
+
+  @@index([petugasId])
+  @@map("shifts")
+}
+
+// FR-1.5 — token reset password. TAMBAHAN di luar 12 model ERD (Langkah 2).
+// Yang disimpan hanya hash SHA-256 token; token mentah hanya ada di link email.
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+// Kode OTP 6 digit via email (register & ganti email). TAMBAHAN di luar 12 model ERD.
+// Yang disimpan hanya HMAC kode; kode mentah hanya ada di email. `email` = alamat TUJUAN kode,
+// sehingga kode untuk email lain tidak bisa dipakai. `verifiedAt` dipakai langkah "email lama"
+// pada ganti email (kode lama terbukti benar -> boleh lanjut ke email baru).
+model EmailOtp {
+  id         String     @id @default(cuid())
+  purpose    OtpPurpose
+  email      String
+  userId     String?
+  codeHash   String
+  attempts   Int        @default(0)
+  expiresAt  DateTime
+  verifiedAt DateTime?
+  createdAt  DateTime   @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([purpose, email])
+  @@index([userId, purpose])
+  @@map("email_otps")
+}
+
+// Tautan akun OAuth (Google) -> User. Satu user bisa punya beberapa provider;
+// satu akun provider hanya boleh terhubung ke satu user. TAMBAHAN di luar 12 model ERD.
+model Account {
+  id                String   @id @default(cuid())
+  userId            String
+  provider          String
+  providerAccountId String
+  createdAt         DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@unique([userId, provider])
+  @@map("accounts")
+}
+
+// ---------------------------------------------------------------------------
+// CATEGORY, FAQ, SLA CONFIG (master data)
+// ---------------------------------------------------------------------------
+
+// FR-2.5 — master data kategori tiket. Nama dibuat unik agar tidak ada duplikat kategori.
+model Category {
+  id              String   @id @default(cuid())
+  nama            String   @unique
+  defaultPriority Priority
+
+  tickets    Ticket[]
+  faqEntries FaqEntry[]
+
+  @@map("categories")
+}
+
+// Aplikasi/produk yang bisa dipilih client saat mengajukan tiket (CRUD di Admin).
+// platforms = daftar Platform yang tersedia untuk aplikasi ini, disimpan sebagai teks pisah koma
+// ("WEB,ANDROID") — MySQL tidak punya enum array. Satu platform saja -> otomatis terisi di form tiket.
+model Application {
+  id        String   @id @default(cuid())
+  nama      String   @unique
+  platforms String
+  createdAt DateTime @default(now())
+
+  tickets Ticket[]
+
+  @@map("applications")
+}
+
+// FR-4.2 — basis FAQ/kata kunci per kategori untuk bot rule-based matching (V1).
+// keywords disimpan sebagai teks (pisah koma) — MySQL tidak punya tipe array native seperti Postgres.
+model FaqEntry {
+  id         String @id @default(cuid())
+  categoryId String
+  keywords   String @db.Text
+  jawaban    String @db.Text
+
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@index([categoryId])
+  @@map("faq_entries")
+}
+
+// FR-6.1 — target SLA per priority (bukan per kategori, lihat catatan desain Tahap 3).
+model SlaConfig {
+  id                 String   @id @default(cuid())
+  priority           Priority @unique
+  targetResponMenit  Int
+  targetSelesaiMenit Int
+
+  @@map("sla_configs")
+}
+
+// ---------------------------------------------------------------------------
+// TICKET + TIMELINE (Modul 3)
+// ---------------------------------------------------------------------------
+
+model Ticket {
+  id            String       @id @default(cuid())
+  clientId      String
+  categoryId    String
+  assignedL1Id  String?
+  assignedL2Id  String?
+  judul         String
+  // Nama aplikasi/produk yang bermasalah + platformnya (diisi client saat mengajukan tiket).
+  // Default untuk baris lama yang dibuat sebelum kolom ini ada.
+  aplikasi      String       @default("-")
+  platform      Platform     @default(OTHER)
+  // Relasi ke master aplikasi. `aplikasi` di atas tetap menyimpan salinan namanya, jadi riwayat
+  // tiket tidak berubah walau aplikasinya kemudian dihapus (applicationId jadi NULL).
+  applicationId String?
+  // HTML hasil CKEditor yang SUDAH disanitasi (lib/client/sanitize.ts). Baris lama berisi teks polos.
+  deskripsi     String       @db.Text
+  priority      Priority
+  status        TicketStatus @default(OPEN)
+  createdAt     DateTime     @default(now())
+  resolvedAt    DateTime?
+  closedAt      DateTime?
+
+  client     User     @relation("TicketClient", fields: [clientId], references: [id])
+  category   Category @relation(fields: [categoryId], references: [id])
+  assignedL1 User?    @relation("TicketAssignedL1", fields: [assignedL1Id], references: [id])
+  assignedL2 User?    @relation("TicketAssignedL2", fields: [assignedL2Id], references: [id])
+  application Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+
+  timeline      TicketTimeline[]
+  chatSessions  ChatSession[]
+  queueEntries  QueueEntry[]
+  notifications Notification[]
+  attachments   TicketAttachment[]
+
+  @@index([clientId])
+  @@index([categoryId])
+  @@index([assignedL1Id])
+  @@index([assignedL2Id])
+  @@index([applicationId])
+  @@index([status])
+  @@map("tickets")
+}
+
+// FR-3.4 — riwayat lengkap tiap perubahan status, terpisah dari Ticket.status
+// (Ticket.status = state terkini untuk query cepat; ini = audit trail tampilan).
+model TicketTimeline {
+  id         String            @id @default(cuid())
+  ticketId   String
+  statusBaru TicketStatus
+  actorType  TimelineActorType
+  // actorId nullable: BOT dan SYSTEM tidak punya baris User.
+  actorId    String?
+  catatan    String?           @db.Text
+  createdAt  DateTime          @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  actor  User?  @relation(fields: [actorId], references: [id])
+
+  @@index([ticketId])
+  @@index([actorId])
+  @@map("ticket_timelines")
+}
+
+// File/gambar yang diunggah lewat editor deskripsi tiket. Isi file disimpan di disk (UPLOAD_DIR),
+// baris ini hanya metadata + kontrol akses. ticketId NULL selama tiketnya belum disubmit
+// (unggahan yatim akibat form yang ditinggalkan). TAMBAHAN di luar 12 model ERD.
+model TicketAttachment {
+  id           String   @id @default(cuid())
+  storedName   String
+  originalName String   @db.VarChar(255)
+  mimeType     String
+  size         Int
+  uploaderId   String
+  ticketId     String?
+  createdAt    DateTime @default(now())
+
+  uploader User    @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+  ticket   Ticket? @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+
+  @@index([uploaderId])
+  @@index([ticketId])
+  @@map("ticket_attachments")
+}
+
+// ---------------------------------------------------------------------------
+// CHAT: PUBLIC (Bot + Client + L1) & INTERNAL (L1 + L2) — Modul 4
+// ---------------------------------------------------------------------------
+
+// @@unique([ticketId, type]) menegakkan aturan "1 tiket maksimal 1 sesi PUBLIC
+// dan 1 sesi INTERNAL" langsung di level database, sesuai keputusan desain Tahap 3.
+model ChatSession {
+  id         String          @id @default(cuid())
+  ticketId   String
+  type       ChatSessionType
+  startedAt  DateTime        @default(now())
+  closedAt   DateTime?
+
+  ticket   Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@unique([ticketId, type])
+  @@map("chat_sessions")
+}
+
+// FR-4.5 — riwayat chat bot ikut tersimpan di sesi PUBLIC yang sama dengan histori L1
+// (sender_type BOT). FR-4.8 — Internal Note L1 direpresentasikan lewat isInternalNote,
+// tetap di sesi PUBLIC, tanpa perlu tabel/kanal baru.
+model Message {
+  id             String     @id @default(cuid())
+  chatSessionId  String
+  senderType     SenderType
+  // senderId nullable: pesan dari BOT tidak punya baris User pengirim.
+  senderId       String?
+  content        String     @db.Text
+  attachmentUrl  String?
+  isInternalNote Boolean    @default(false)
+  createdAt      DateTime   @default(now())
+  // Balas pesan (seperti WhatsApp): menunjuk pesan yang dikutip. Null bila bukan balasan / pesan asal terhapus.
+  replyToId      String?
+  // "Hapus untuk semua": isi dikosongkan dan diberi cap waktu; baris tetap ada supaya balasan & urutan chat utuh.
+  deletedAt      DateTime?
+  // "Teruskan pesan": salinan pesan lain yang dikirim ulang oleh Petugas (mis. L1 meneruskan info L2 ke client).
+  forwarded      Boolean    @default(false)
+
+  chatSession ChatSession   @relation(fields: [chatSessionId], references: [id], onDelete: Cascade)
+  sender      User?         @relation(fields: [senderId], references: [id])
+  replyTo     Message?      @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies     Message[]     @relation("MessageReplies")
+  hides       MessageHide[]
+
+  @@index([chatSessionId])
+  @@index([senderId])
+  @@index([replyToId])
+  @@map("messages")
+}
+
+// "Hapus untuk saya": pesan disembunyikan hanya dari tampilan satu user, pengguna lain tetap melihatnya.
+model MessageHide {
+  messageId String
+  userId    String
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+  @@index([userId])
+  @@map("message_hides")
+}
+
+// ---------------------------------------------------------------------------
+// ASSIGNMENT & QUEUE (Modul 5)
+// ---------------------------------------------------------------------------
+
+// Baris terpisah per level (L1/L2) agar satu tiket bisa masuk antrean dua kali
+// dalam hidupnya tanpa riwayat antrean saling menimpa (catatan desain Tahap 3).
+model QueueEntry {
+  id           String     @id @default(cuid())
+  ticketId     String
+  level        QueueLevel
+  assignedToId String?
+  enteredAt    DateTime   @default(now())
+  assignedAt   DateTime?
+
+  ticket     Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  assignedTo User?  @relation(fields: [assignedToId], references: [id])
+
+  @@index([ticketId])
+  @@index([level])
+  @@index([assignedToId])
+  @@map("queue_entries")
+}
+
+// ---------------------------------------------------------------------------
+// NOTIFICATION & AUDIT LOG (Modul 6 & 8)
+// ---------------------------------------------------------------------------
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  // ticketId opsional: notifikasi generik (mis. pengumuman) tidak terikat tiket.
+  ticketId  String?
+  type      NotificationType
+  // Judul singkat (nullable: baris lama hanya punya `message`).
+  title     String?          @db.VarChar(160)
+  message   String           @db.Text
+  // Tautan tujuan, sudah dihitung saat notifikasi dibuat (per role penerima). Disimpan di baris
+  // supaya mengubah aturan nanti tidak merusak notifikasi lama. Selalu path internal ("/...").
+  href      String?          @db.VarChar(255)
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticket Ticket? @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+  @@index([ticketId])
+  @@map("notifications")
+}
+
+// Pengaturan notifikasi oleh Admin. TAMBAHAN di luar 12 model ERD.
+//  - eventKey terisi  -> aturan untuk kejadian bawaan (lib/notify/events.ts), mis. CLIENT_REPLIED.
+//                        Baris dibuat saat Admin pertama kali menyimpan; selama belum ada, nilai bawaan kode dipakai.
+//  - eventKey NULL    -> template pengumuman manual buatan Admin, dikirim lewat tombol "Send now".
+// audience disimpan sebagai teks pisah koma (MySQL tidak punya enum array), mis. "CLIENT,ASSIGNED_L1".
+model NotificationRule {
+  id         String             @id @default(cuid())
+  eventKey   String?            @unique @db.VarChar(40)
+  name       String             @db.VarChar(80)
+  enabled    Boolean            @default(true)
+  title      String             @db.VarChar(160)
+  message    String             @db.Text
+  audience   String             @db.VarChar(160)
+  target     NotificationTarget @default(TICKET)
+  customPath String?            @db.VarChar(200)
+  // Hanya untuk pengumuman manual: kapan terakhir dikirim lewat "Send now" dan ke berapa orang.
+  lastSentAt    DateTime?
+  lastSentCount Int?
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+
+  @@map("notification_rules")
+}
+
+// FR-8.1/8.2 — read-only, tidak boleh diedit/dihapus siapa pun (ditegakkan di level
+// aplikasi/API, bukan di skema — Prisma tidak punya constraint "no update/delete").
+// Baris log TIDAK ikut terhapus saat akun pelakunya dihapus: actorId menjadi NULL (SetNull),
+// dan actorName menyimpan nama saat kejadian supaya jejak audit tetap terbaca.
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorId     String?
+  actorName   String?
+  action      String
+  entityType  String
+  entityId    String
+  description String?  @db.Text
+  createdAt   DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
