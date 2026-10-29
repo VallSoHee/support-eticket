@@ -1,0 +1,49 @@
+{
+  "name": "laporan-pkl",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "postinstall": "prisma generate",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio",
+    "db:seed": "prisma db seed",
+    "db:requeue": "tsx scripts/requeue-open-tickets.ts",
+    "db:faq": "tsx scripts/seed-faq.ts"
+  },
+  "dependencies": {
+    "@ckeditor/ckeditor5-react": "^11.0.0",
+    "@prisma/adapter-mariadb": "^7.10.0",
+    "@prisma/client": "^7.10.0",
+    "bcryptjs": "^3.0.2",
+    "ckeditor5": "^46.0.0",
+    "dotenv": "^16.4.5",
+    "mariadb": "^3.5.0",
+    "next": "16.3.6",
+    "next-auth": "^5.0.0-beta.30",
+    "nodemailer": "^7.0.7",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "sanitize-html": "^2.17.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/nodemailer": "^8.0.0",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/sanitize-html": "^2.16.0",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.6",
+    "prisma": "^7.10.0",
+    "tailwindcss": "^4",
+    "tsx": "^4.20.0",
+    "typescript": "^5"
+  }
+}

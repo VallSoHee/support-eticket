@@ -1,0 +1,541 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* Palet mengikuti desain Figma login (Valify). */
+@theme {
+  /* Hanya --color-brand yang diganti saat user memilih warna tema (lib/theme.ts);
+     varian dark & soft dihitung otomatis darinya. */
+  --color-brand: #ff1a47;
+  --color-brand-dark: color-mix(in srgb, var(--color-brand) 88%, black);
+  --color-brand-soft: color-mix(in srgb, var(--color-brand) 14%, white);
+  --color-ink: #1c2130;
+  --color-muted: #7a8296;
+  --color-field: #f3f5f9;
+  --color-line: #e7eaf1;
+}
+
+/* Didaftarkan sebagai <color> supaya perubahan warna tema bisa dianimasikan halus. */
+@property --color-brand {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #ff1a47;
+}
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    transition: --color-brand 0.18s ease-out;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+/* ---- Flip card Sign in <-> Sign Up (components/auth/AuthPanel.tsx) ---- */
+.flip-scene {
+  perspective: 1800px;
+}
+.flip-inner {
+  position: relative;
+  display: grid; /* dua sisi ditumpuk di sel yang sama -> tinggi = sisi tertinggi */
+  transform-style: preserve-3d;
+  transition: transform 0.9s cubic-bezier(0.45, 0.05, 0.2, 1);
+  will-change: transform;
+}
+.flip-inner[data-flipped="true"] {
+  transform: rotateY(180deg);
+}
+.flip-face {
+  grid-area: 1 / 1;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.flip-back {
+  transform: rotateY(180deg);
+}
+
+/* ---- Login <-> Forgot password (components/auth/FlipCard.tsx) ----
+   Dua sisi ditumpuk di kartu yang sama, tapi hanya sisi aktif yang ikut alur layout, jadi tinggi
+   kartu = tinggi form yang tampil. Saat transisi, FlipCard menandai sisi lama dengan .swap-leaving
+   (absolute, tetap terlihat) sambil menganimasikan tinggi kartu dan memudarkan isinya. */
+.swap-stack {
+  position: relative;
+}
+.swap-layer[data-active="false"] {
+  display: none;
+}
+.swap-layer.swap-leaving {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+}
+
+/* Halaman non-flip (reset password): fade-up halus. */
+@keyframes auth-fade-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.auth-fade-up {
+  animation: auth-fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ---- Transisi login -> dashboard Client ----
+   Keluar (login): overlay merah membesar dari tombol Sign In (components/auth/LoginTransition.tsx).
+   Masuk (dashboard): layar merah yang sama bertahan sebentar, lalu dashboard "dibuka" sebagai
+   lingkaran dari tengah layar (components/client/ClientShell.tsx). Kedua sisi memakai warna,
+   posisi, dan teks yang identik, jadi pergantian halaman di tengahnya tidak terlihat. */
+@keyframes login-leave-grow {
+  from { clip-path: circle(0px at var(--ox, 50%) var(--oy, 50%)); }
+  to   { clip-path: circle(150vmax at var(--ox, 50%) var(--oy, 50%)); }
+}
+@keyframes splash-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+.login-leave {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--color-brand, #ff1a47);
+  clip-path: circle(150vmax at var(--ox, 50%) var(--oy, 50%));
+  animation: login-leave-grow 0.75s cubic-bezier(0.7, 0, 0.2, 1) both;
+}
+.login-leave > * {
+  animation: splash-in 0.35s ease 0.4s both;
+}
+
+@keyframes arrive-reveal {
+  from { clip-path: circle(0vmax at 50% 50vh); }
+  to   { clip-path: circle(150vmax at 50% 50vh); }
+}
+@keyframes arrive-backdrop-out {
+  to { opacity: 0; visibility: hidden; }
+}
+.arrive-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: var(--color-brand, #ff1a47);
+  animation: arrive-backdrop-out 0.25s ease 1.75s forwards;
+}
+/* `backwards`: klip hanya berlaku selama jeda + animasi, setelah itu elemen kembali normal. */
+.arrive-reveal {
+  animation: arrive-reveal 0.95s cubic-bezier(0.65, 0, 0.2, 1) 0.6s backwards;
+}
+
+@keyframes avatar-in {
+  from { opacity: 0; transform: scale(1.15); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ---- Tab My tickets (components/client/TicketTabs.tsx) ---- */
+@keyframes tab-count-pop {
+  0%   { transform: scale(0.6); opacity: 0.4; }
+  60%  { transform: scale(1.25); opacity: 1; }
+  100% { transform: scale(1); }
+}
+/* Daftar tiket: panel fade+naik saat filter/search/halaman berganti, baris muncul berurutan. */
+@keyframes ticket-panel-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes ticket-row-in {
+  from { opacity: 0; transform: translateX(-10px); }
+  to   { opacity: 1; transform: none; }
+}
+/* Selama pindah tab: daftar lama meredup + sedikit mengecil sampai data baru tiba. */
+.ticket-list-wrap {
+  transition: opacity 0.25s ease, filter 0.25s ease, transform 0.25s ease;
+}
+.tickets-root:has([data-pending="true"]) .ticket-list-wrap {
+  opacity: 0.45;
+  filter: blur(1.5px);
+  transform: scale(0.992);
+  pointer-events: none;
+}
+.ticket-panel-in {
+  animation: ticket-panel-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.ticket-row-in {
+  animation: ticket-row-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ticket-panel-in, .ticket-row-in { animation: none; }
+  .ticket-list-wrap { transition: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flip-inner { transition-duration: 0.01ms; }
+  .auth-fade-up { animation: none; }
+  .login-leave { display: none; }
+  .arrive-backdrop { display: none; }
+  .arrive-reveal { animation: none; }
+}
+
+/* ---- Rich text deskripsi tiket ---------------------------------------------------------
+   .rich-content = tampilan hasil (components/RichText.tsx)
+   .ck-content   = area ketik CKEditor (components/client/RichTextEditor.tsx)
+   Preflight Tailwind menghapus gaya bawaan list/heading/tabel, jadi dipulihkan di sini. */
+.rich-content,
+.ck-content {
+  font-size: 14px;
+  line-height: 1.7;
+  color: rgb(28 33 48 / 0.85);
+  overflow-wrap: anywhere;
+}
+.rich-content > * + *,
+.ck-content > * + * {
+  margin-top: 0.75em;
+}
+.rich-content h2,
+.ck-content h2 {
+  font-size: 1.25rem;
+  font-weight: 800;
+  line-height: 1.3;
+  color: var(--color-ink);
+}
+.rich-content h3,
+.ck-content h3 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--color-ink);
+}
+.rich-content ul,
+.ck-content ul {
+  list-style: disc;
+  padding-left: 1.5rem;
+}
+.rich-content ol,
+.ck-content ol {
+  list-style: decimal;
+  padding-left: 1.5rem;
+}
+.rich-content blockquote,
+.ck-content blockquote {
+  border-left: 3px solid var(--color-line);
+  padding-left: 1rem;
+  color: var(--color-muted);
+  font-style: italic;
+}
+.rich-content a,
+.ck-content a {
+  color: var(--color-brand);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.rich-content code,
+.ck-content code {
+  border-radius: 6px;
+  background: var(--color-field);
+  padding: 0.1em 0.4em;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.9em;
+}
+.rich-content pre,
+.ck-content pre {
+  overflow-x: auto;
+  border-radius: 12px;
+  background: var(--color-field);
+  padding: 0.85rem 1rem;
+}
+.rich-content pre code,
+.ck-content pre code {
+  background: none;
+  padding: 0;
+}
+.rich-content figure.image,
+.ck-content figure.image {
+  margin: 1em 0;
+}
+.rich-content img,
+.ck-content img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 12px;
+  border: 1px solid var(--color-line);
+}
+.rich-content figure.table,
+.ck-content figure.table {
+  overflow-x: auto;
+}
+.rich-content table,
+.ck-content table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.rich-content th,
+.rich-content td,
+.ck-content th,
+.ck-content td {
+  border: 1px solid var(--color-line);
+  padding: 0.4rem 0.7rem;
+  text-align: left;
+  vertical-align: top;
+}
+.rich-content th,
+.ck-content th {
+  background: var(--color-field);
+  font-weight: 700;
+}
+
+/* Bingkai editor: selaras dengan input lain (rounded, fokus merah). */
+.rich-editor .ck.ck-editor__main > .ck-editor__editable {
+  min-height: 320px;
+  padding: 0.5rem 1rem;
+}
+.rich-editor .ck.ck-toolbar {
+  border-top-left-radius: 1rem;
+  border-top-right-radius: 1rem;
+  border-color: var(--color-line);
+  background: var(--color-field);
+}
+.rich-editor .ck.ck-editor__main > .ck-editor__editable:not(.ck-focused) {
+  border-color: var(--color-line);
+}
+.rich-editor .ck.ck-editor__main > .ck-editor__editable {
+  border-bottom-left-radius: 1rem;
+  border-bottom-right-radius: 1rem;
+}
+.rich-editor .ck.ck-editor__editable.ck-focused:not(.ck-editor__nested-editable) {
+  border-color: rgb(255 26 71 / 0.6);
+  box-shadow: 0 0 0 4px rgb(255 26 71 / 0.1);
+}
+.rich-editor-invalid .ck.ck-editor__main > .ck-editor__editable,
+.rich-editor-invalid .ck.ck-toolbar {
+  border-color: var(--color-brand);
+}
+
+/* Editor versi ringkas untuk chat (RichTextEditor variant="compact"): pendek, toolbar kecil, scroll bila panjang. */
+.rich-editor-compact .ck.ck-editor__main > .ck-editor__editable {
+  min-height: 44px;
+  max-height: 150px;
+  overflow-y: auto;
+  padding: 0.25rem 0.9rem;
+  font-size: 14px;
+}
+.rich-editor-compact .ck.ck-toolbar {
+  border-top-left-radius: 1rem;
+  border-top-right-radius: 1rem;
+  padding: 0 0.35rem;
+}
+.rich-editor-compact .ck.ck-toolbar .ck-button {
+  margin: 1px;
+}
+.rich-editor-compact .ck.ck-editor__main > .ck-editor__editable.ck-content > * + * {
+  margin-top: 0.4em;
+}
+.rich-editor-compact .ck-content img {
+  max-width: 160px;
+}
+
+/* Isi pesan chat (bubble): mewarisi warna bubble, rapat, gambar kecil. */
+.chat-rich {
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.chat-rich > * + * {
+  margin-top: 0.4em;
+}
+.chat-rich p {
+  margin: 0;
+}
+.chat-rich a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.chat-rich ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+.chat-rich ol {
+  list-style: decimal;
+  padding-left: 1.25rem;
+}
+.chat-rich blockquote {
+  border-left: 3px solid currentColor;
+  opacity: 0.85;
+  padding-left: 0.75rem;
+}
+.chat-rich code {
+  border-radius: 6px;
+  background: rgb(0 0 0 / 0.12);
+  padding: 0.05em 0.35em;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.9em;
+}
+.chat-rich figure.image {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+}
+/* Lebar gambar TIDAK boleh memakai persen: persen di dalam bubble yang menyesuaikan isi membuat bubble
+   melebar sebesar gambar aslinya (bubble jadi kosong di sisi kanan). Batas px/vw tidak punya masalah itu. */
+.chat-rich img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: min(260px, 62vw);
+  max-height: 260px;
+  border-radius: 10px;
+  cursor: zoom-in;
+}
+.chat-rich img:hover {
+  filter: brightness(0.95);
+}
+/* Tautan file lampiran tampil sebagai "chip" dengan ikon klip. */
+.chat-rich a[href^="/api/uploads/"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  max-width: 100%;
+  padding: 0.3rem 0.7rem;
+  border-radius: 0.65rem;
+  background: rgb(0 0 0 / 0.08);
+  font-size: 0.92em;
+  font-weight: 600;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.chat-rich a[href^="/api/uploads/"]:hover {
+  background: rgb(0 0 0 / 0.14);
+}
+.chat-rich a[href^="/api/uploads/"]::before {
+  content: "";
+  flex: none;
+  width: 1em;
+  height: 1em;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+/* ===== Hiasan animasi di halaman profil (components/profile/ProfileAnimation.tsx) ===== */
+@keyframes profile-ring {
+  0% {
+    transform: scale(0.7);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(3.2);
+    opacity: 0;
+  }
+}
+@keyframes profile-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-3deg);
+  }
+  50% {
+    transform: translateY(-8px) rotate(3deg);
+  }
+}
+@keyframes profile-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes profile-rise {
+  0% {
+    transform: translateY(0) scale(0.6);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateY(-15rem) scale(1);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .profile-anim *,
+  .profile-anim {
+    animation: none !important;
+  }
+}
+
+/* Slider hue di pemilih warna tema (components/profile/BannerThemePicker.tsx) */
+.theme-hue {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 12px;
+  border-radius: 9999px;
+  outline: none;
+  cursor: pointer;
+}
+.theme-hue::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  background: #fff;
+  border: 3px solid var(--color-ink);
+  box-shadow: 0 2px 8px rgba(28, 33, 48, 0.3);
+}
+.theme-hue::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: #fff;
+  border: 3px solid var(--color-ink);
+  box-shadow: 0 2px 8px rgba(28, 33, 48, 0.3);
+}
+.theme-hue:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 3px;
+}
+
+/* ---- Bel notifikasi (components/notifications/NotificationBell.tsx) ---- */
+@keyframes bell-ring {
+  0%, 100% { transform: rotate(0); }
+  15% { transform: rotate(14deg); }
+  30% { transform: rotate(-12deg); }
+  45% { transform: rotate(9deg); }
+  60% { transform: rotate(-6deg); }
+  75% { transform: rotate(3deg); }
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.bell-ring {
+  display: inline-flex;
+  transform-origin: 50% 0;
+  animation: bell-ring 0.9s ease-in-out;
+}
+.toast-in {
+  animation: toast-in 0.22s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bell-ring,
+  .toast-in {
+    animation: none;
+  }
+}
